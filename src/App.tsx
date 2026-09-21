@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
-import { Activity, BarChart3, Bell, Bot, ChevronDown, CircleHelp, Clock3, Database, Gauge, GitBranch, Layers3, LayoutDashboard, Menu, Play, ShieldCheck, SlidersHorizontal, Sparkles, Workflow as WorkflowIcon, X } from 'lucide-react'
+import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { Activity, AlertTriangle, BarChart3, Bell, Bot, ChevronDown, CircleHelp, Clock3, Database, Gauge, GitBranch, Layers3, LayoutDashboard, Menu, Play, ShieldCheck, SlidersHorizontal, Sparkles, Workflow as WorkflowIcon, X } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { ActivityEvent, Metric, PolicyMode, Reservation, Resource, Workflow } from './domain/types'
 import { sunkGuardApi } from './services/api'
+import { ActivityPage, AnalyticsPage, PoliciesPage, ReservationsPage, ResourcesPage, WorkflowsPage } from './pages/OperationsPages'
 import './App.css'
+import './polish.css'
 
 const navItems = [
   { label: 'Overview', path: '/', icon: LayoutDashboard }, { label: 'Workflows', path: '/workflows', icon: WorkflowIcon },
@@ -18,8 +20,29 @@ type Overview = Awaited<ReturnType<typeof sunkGuardApi.getOverview>>
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [policyMode, setPolicyMode] = useState<PolicyMode>('Medium')
+  const [demoAction, setDemoAction] = useState('')
+  const [demoPhase, setDemoPhase] = useState(0)
   const [overview, setOverview] = useState<Overview | null>(null)
-  useEffect(() => { void sunkGuardApi.getOverview().then(setOverview) }, [])
+  const [loadError, setLoadError] = useState(false)
+  useEffect(() => { void sunkGuardApi.getOverview().then(setOverview).catch(() => setLoadError(true)) }, [])
+  useEffect(() => {
+    if (demoPhase === 0) return
+    const timer = window.setTimeout(() => setDemoPhase((phase) => phase < 7 ? phase + 1 : 0), 950)
+    return () => window.clearTimeout(timer)
+  }, [demoPhase])
+  const demoMessages = [
+    'Step 1/7 · Workflow A is 82% complete with $42.80 work-at-risk.',
+    'Step 2/7 · Workflow B is 14% complete and contending for Gemini capacity.',
+    'Step 3/7 · SunkGuard protects A: HARD reservation committed for its remaining chain.',
+    'Step 4/7 · Workflow B waits while aging raises its effective priority.',
+    'Step 5/7 · Workflow A completes its protected steps.',
+    'Step 6/7 · A reservation releases automatically; Gemini capacity is available.',
+    'Step 7/7 · Workflow B is admitted. Demo sequence complete.',
+  ]
+  const demoNotice = demoPhase > 0 ? demoMessages[demoPhase - 1] : demoAction
+  const runDemo = () => { setDemoAction(''); setDemoPhase(1) }
+  const runMismatch = () => { setDemoPhase(0); setDemoAction('Mismatch injected · predicted Gemini → actual Python tool → stale reservation released → re-planning → new reservation.') }
+  if (loadError) return <div className="state-screen error-state"><AlertTriangle size={22} /><strong>Controller state unavailable</strong><span>The demo data service could not load. Refresh to retry the local frontend state.</span></div>
   if (!overview) return <div className="loading-screen"><Sparkles size={18} /> Loading controller state...</div>
   return <BrowserRouter>
     <div className="app-shell">
@@ -31,16 +54,31 @@ function App() {
       </aside>
       {sidebarOpen && <button className="mobile-overlay" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
       <main className="main-shell">
-        <header className="topbar"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={20} /></button><div className="breadcrumbs"><span>Control plane</span><span>/</span><strong>Overview</strong></div><div className="topbar-actions"><div className="live-indicator"><span className="status-dot" /> Live simulation</div><button className="icon-button" aria-label="Notifications"><Bell size={18} /><i /></button><div className="user-avatar">AS</div></div></header>
-        <Routes><Route path="/" element={<OverviewPage {...overview} policyMode={policyMode} setPolicyMode={setPolicyMode} />} /><Route path="*" element={<PlaceholderPage />} /></Routes>
+        <Topbar onOpenNavigation={() => setSidebarOpen(true)} />
+        <Routes>
+          <Route path="/" element={<OverviewPage {...overview} policyMode={policyMode} setPolicyMode={setPolicyMode} onRunDemo={runDemo} demoNotice={demoNotice} />} />
+          <Route path="/workflows" element={<WorkflowsPage data={overview} onRunDemo={runDemo} onWrongPrediction={runMismatch} demoNotice={demoNotice} />} />
+          <Route path="/resources" element={<ResourcesPage data={overview} />} />
+          <Route path="/reservations" element={<ReservationsPage data={overview} />} />
+          <Route path="/analytics" element={<AnalyticsPage experiment={overview.experiment} />} />
+          <Route path="/activity" element={<ActivityPage events={overview.events} />} />
+          <Route path="/policies" element={<PoliciesPage policy={overview.policy} mode={policyMode} onChange={setPolicyMode} />} />
+        </Routes>
       </main>
     </div>
   </BrowserRouter>
 }
 
-function OverviewPage({ metrics, workflows, resources, reservations, prediction, events, experiment, policy, policyMode, setPolicyMode }: Overview & { policyMode: PolicyMode; setPolicyMode: (mode: PolicyMode) => void }) {
+function Topbar({ onOpenNavigation }: { onOpenNavigation: () => void }) {
+  const location = useLocation()
+  const current = navItems.find((item) => item.path === location.pathname)?.label ?? 'Overview'
+  return <header className="topbar"><button className="icon-button menu-button" onClick={onOpenNavigation} aria-label="Open navigation"><Menu size={20} /></button><div className="breadcrumbs"><span>Control plane</span><span>/</span><strong>{current}</strong></div><div className="topbar-actions"><div className="live-indicator"><span className="status-dot" /> Live simulation</div><button className="icon-button" aria-label="Notifications"><Bell size={18} /><i /></button><div className="user-avatar">AS</div></div></header>
+}
+
+function OverviewPage({ metrics, workflows, resources, reservations, prediction, events, experiment, policy, policyMode, setPolicyMode, onRunDemo, demoNotice }: Overview & { policyMode: PolicyMode; setPolicyMode: (mode: PolicyMode) => void; onRunDemo: () => void; demoNotice?: string }) {
   return <div className="page-container">
-    <section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> SunkGuard control plane <span className="eyebrow-divider">/</span> <span>Demo data · Seed 1042</span></div><h1>Protecting work in progress.</h1><p>One view of the agents, resources, and reservations keeping your most valuable work moving.</p></div><div className="heading-actions"><button className="button secondary"><Play size={15} /> Run demo scenario</button><button className="button primary"><Sparkles size={15} /> New workflow</button></div></section>
+    <section className="page-heading"><div><div className="eyebrow"><span className="status-dot" /> SunkGuard control plane <span className="eyebrow-divider">/</span> <span>Demo data · Seed 1042</span></div><h1>Protecting work in progress.</h1><p>One view of the agents, resources, and reservations keeping your most valuable work moving.</p></div><div className="heading-actions"><button className="button secondary" onClick={onRunDemo}><Play size={15} /> Run demo scenario</button><button className="button primary"><Sparkles size={15} /> New workflow</button></div></section>
+    {demoNotice && <div className="demo-notice"><Sparkles size={14} /> {demoNotice}</div>}
     <section className="metric-grid">{metrics.map((metric) => <MetricCard key={metric.label} metric={metric} />)}</section>
     <div className="content-grid two-thirds"><section className="panel workflow-panel"><PanelHeader title="Workflow control" subtitle="Live view of concurrent agent work" action="View all workflows" /><div className="scenario-callout"><div className="scenario-icon"><ShieldCheck size={17} /></div><div><strong>Protection scenario active</strong><span>Workflow A is 82% complete. SunkGuard reserved its remaining chain before admitting newer work.</span></div><span className="scenario-tag">80% vs 10%</span></div><div className="workflow-list">{workflows.map((workflow) => <WorkflowRow key={workflow.id} workflow={workflow} />)}</div></section><section className="panel protection-panel"><PanelHeader title="Why this was protected" subtitle="Decision record · wf-092" action="Details" /><div className="decision-hero"><div className="decision-icon"><ShieldCheck size={22} /></div><div><strong>Customer insight brief</strong><span>Hard reservation committed</span></div><span className="status-badge hard">HARD</span></div><div className="decision-stats"><DecisionStat label="Work-at-risk" value="$42.80" /><DecisionStat label="Failure risk" value="38% → 6%" /><DecisionStat label="Protection value" value="4.84" /><DecisionStat label="Predicted demand" value="16k tokens" /></div><div className="formula-box"><span>protection value</span><strong>work-at-risk × Δ failure probability ÷ capacity</strong><small>42.80 × 0.32 ÷ 2.83 = 4.84</small></div><div className="decision-footer"><span><span className="status-dot" /> Decision inputs measured</span><span>confidence 0.92</span></div></section></div>
     <div className="content-grid equal"><section className="panel"><PanelHeader title="Shared resources" subtitle="Used capacity vs. future reservations" action="Manage resources" /><div className="resource-list">{resources.map((resource) => <ResourceRow key={resource.id} resource={resource} />)}</div></section><section className="panel chain-panel"><PanelHeader title="Remaining chain" subtitle={`${prediction.workflowName} · predicted path`} action="Open workflow" /><div className="chain-meta"><span><span className="status-dot" /> Prediction confidence</span><strong>{Math.round(prediction.pathConfidence * 100)}%</strong><span className="chain-demand">{prediction.remainingTokens} remaining</span></div><div className="chain-flow">{prediction.nodes.map((node, index) => <div className="chain-step" key={`${node.label}-${index}`}><div className={`chain-node ${node.state}`}><span>{node.label}</span><small>{node.detail}</small>{node.state !== 'complete' && <em>{Math.round(node.confidence * 100)}%</em>}</div>{index < prediction.nodes.length - 1 && <div className="chain-arrow" />}</div>)}</div><div className="chain-note"><GitBranch size={15} /> Full remaining chain reserved atomically to avoid partial-lock deadlocks.</div></section></div>
@@ -58,6 +96,4 @@ function ReservationRow({ reservation }: { reservation: Reservation }) { return 
 function ActivityRow({ event }: { event: ActivityEvent }) { const Icon = event.type === 'success' ? ShieldCheck : event.type === 'warning' ? Clock3 : event.type === 'danger' ? X : Sparkles; return <div className="activity-row"><div className={`activity-icon ${event.type}`}><Icon size={14} /></div><div><strong>{event.title}</strong><span>{event.detail}</span></div><time>{event.timestamp}</time></div> }
 function DecisionStat({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div> }
 function Meter({ label, value, percent }: { label: string; value: string; percent: number }) { return <div className="meter"><div><span>{label}</span><strong>{value}</strong></div><div className="meter-track"><span style={{ width: `${percent}%` }} /></div></div> }
-function PlaceholderPage() { return <div className="placeholder page-container"><div className="placeholder-icon"><Layers3 size={24} /></div><div className="eyebrow">SunkGuard control plane</div><h1>This route is ready for live state.</h1><p>This page is part of the frontend foundation. Its domain surface is wired for the controller API and will be populated in the next build stage.</p><NavLink to="/" className="button secondary">Back to overview</NavLink></div> }
-
 export default App
