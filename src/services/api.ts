@@ -1,0 +1,2 @@
+import { events, experiment, metrics, policy, prediction, reservations, resources, workflows } from '../data/mockData'
+export const sunkGuardApi = { async getOverview() { return { events, experiment, metrics, policy, prediction, reservations, resources, workflows } } }
